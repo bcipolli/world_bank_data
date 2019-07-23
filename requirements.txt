@@ -1,3 +1,4 @@
+cachetools
+lxml
 pandas
 requests
-cachetools

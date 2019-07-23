@@ -1,8 +1,12 @@
 """Request the world bank API"""
+import json
 from copy import copy
-from requests import get, HTTPError
+
 import pandas as pd
 from cachetools import cached, TTLCache
+from lxml import etree
+from requests import get, HTTPError
+
 import world_bank_data.options as options
 
 WORLD_BANK_URL = 'http://api.worldbank.org/v2'
@@ -63,14 +67,27 @@ def wb_get(*args, **kwargs):
 
     response = get(url=url, params=params)
     response.raise_for_status()
-    data = response.json()
-    if isinstance(data, list) and data and 'message' in data[0]:
-        try:
-            msg = data[0]['message'][0]['value']
-        except (KeyError, IndexError):
-            msg = str(msg)
 
-        raise ValueError("{msg}\nurl={url}\nparams={params}".format(msg=msg, url=url, params=params))
+    # Parse the JSON response; iterate through multiple ways there could be errors
+    msg = None
+    try:
+        data = response.json()
+        if isinstance(data, list) and data and 'message' in data[0]:
+            # Parse error message from success response
+            try:
+                msg = data[0]['message'][0]['value']
+            except (KeyError, IndexError):
+                msg = str(msg)
+    except json.JSONDecodeError as ex:
+        # We got back an XML error (bug in API - we requested JSON)
+        try:
+            msg = etree.fromstring(response.content)[0].text
+        except:
+            # Couldn't parse the error; report as raw text
+            msg = response.text
+    finally:
+        if msg:
+            raise ValueError("{msg}\nurl={url}\nparams={params}".format(msg=msg, url=url, params=params))
 
     # Redo the request and get the full information when the first response is incomplete
     if params['format'] == 'json' and isinstance(data, list):
